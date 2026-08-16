@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # GigPath – Smart Financial Guidance Platform for Gig Workers With AI Chats
 
 ## Technologies Used
@@ -140,3 +141,6 @@ The project already includes Firebase configuration (`google-services.json`). En
 =======
 # gigpath-web-app
 >>>>>>> 8d36b603d04de6605cef82cac0258f5dcf345686
+=======
+# r-capstone-project
+>>>>>>> origin/main
