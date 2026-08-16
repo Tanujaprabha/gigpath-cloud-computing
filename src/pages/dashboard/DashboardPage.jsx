@@ -25,6 +25,7 @@ export default function DashboardPage() {
     profileLoading,
     profile,
     notifications,
+    spendingAnalytics,
   } = useAppContext()
 
   const unreadNotifications = notifications.filter(n => !n.read)
@@ -50,6 +51,15 @@ export default function DashboardPage() {
     ? (totals.savingsTotal / totals.earningsTotal) * 100
     : 0
   const upcomingRecurring = recurringExpenses.slice(0, 3)
+
+  // Safe to Spend / Day Logic
+  const today = new Date();
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const remainingDays = endOfMonth.getDate() - today.getDate() + 1;
+  const currentMonthExpenses = spendingAnalytics?.totalMonthlySpending || 0;
+  const monthlyBudget = profile?.monthlyBudget || totals.earningsTotal || 0;
+  const remainingBudget = monthlyBudget - currentMonthExpenses;
+  const safeToSpendPerDay = (remainingBudget > 0 && remainingDays > 0) ? (remainingBudget / remainingDays) : 0;
 
   return (
     <div className="page-stack">
@@ -85,6 +95,15 @@ export default function DashboardPage() {
             <div>
               <strong>{formatPercent(savingsRate)}</strong>
               <span>{t('dashboard.savingsRate')}</span>
+            </div>
+          </div>
+          <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+            <div style={{ marginBottom: '1rem' }}>
+              <span style={{ display: 'block', fontSize: '0.85rem', opacity: 0.9 }}>Safe to Spend / Day</span>
+              <strong style={{ fontSize: '1.25rem' }}>{remainingBudget <= 0 ? '₹0.00/day' : `₹${safeToSpendPerDay.toFixed(2)}/day`}</strong>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.85rem', opacity: 0.9 }}>Days Remaining This Month: {remainingDays}</span>
             </div>
           </div>
         </SurfaceCard>

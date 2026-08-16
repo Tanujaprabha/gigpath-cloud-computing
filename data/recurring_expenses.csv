@@ -1,0 +1,3 @@
+"id","uid","title","category","amount","nextCharge","frequency","status","createdAt"
+"rec-101","test_user_001","Commercial Insurance","categories.insurance",118,2026-05-11,"frequency.monthly","status.scheduled",NA
+"rec-102","test_user_001","Fuel Membership","categories.fuel",45,2026-05-08,"frequency.monthly","status.scheduled",NA

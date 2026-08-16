@@ -51,6 +51,7 @@ import {
 import { formatCurrency } from '../utils/formatters'
 import { getDashboardAnalytics } from '../analytics/dashboardAnalytics'
 import { safeDate } from '../utils/dateUtils'
+import { getBudgetRecommendation, getFinancialAnalysis } from '../services/rAnalyticsService'
 
 const AppContext = createContext(null)
 const SESSION_STORAGE_KEY = 'gigpath-session'
@@ -95,6 +96,122 @@ export function AppProvider({ children }) {
   
   const [profile, setProfile] = useState(initialProfile)
   const [profileLoading, setProfileLoading] = useState(false)
+
+  // Phase 4A R Budget Recommendation State
+  const [rBudgetRecommendation, setRBudgetRecommendation] = useState(null)
+  const [rBudgetLoading, setRBudgetLoading] = useState(false)
+  const [rBudgetError, setRBudgetError] = useState(null)
+  const budgetRequestIdRef = useRef(0)
+
+  const fetchRBudgetRecommendation = async (
+    customTx = transactions,
+    customGoals = goals,
+    customRec = recurringExpenses
+  ) => {
+    if (!session?.uid) return null
+
+    const requestId = ++budgetRequestIdRef.current
+    console.log("[RBudget/Financial] request started (budget)", requestId)
+    setRBudgetLoading(true)
+
+    try {
+      const result = await getBudgetRecommendation(
+        session.uid,
+        customTx,
+        customGoals,
+        customRec
+      )
+
+      if (requestId !== budgetRequestIdRef.current) {
+        console.log("[RBudget/Financial] ignoring stale response (budget)", requestId)
+        return result
+      }
+
+      const normalizedStatus = Array.isArray(result?.status) ? result.status[0] : result?.status;
+
+      if (result && normalizedStatus === 'success') {
+        setRBudgetRecommendation(result)
+        setRBudgetError(null)
+        console.log("[RBudget/Financial] success (budget)", requestId)
+        return result
+      } else {
+        const rawMsg = result?.message
+        const msg = (Array.isArray(rawMsg) ? rawMsg[0] : rawMsg) || 'Failed to fetch R budget recommendation'
+        setRBudgetError(msg)
+        console.log("[RBudget/Financial] error (budget)", requestId, msg)
+        return result
+      }
+    } catch (err) {
+      if (requestId === budgetRequestIdRef.current) {
+        setRBudgetError(err.message)
+        console.log("[RBudget/Financial] error (budget)", requestId, err.message)
+      }
+      return { status: 'error', message: err.message }
+    } finally {
+      if (requestId === budgetRequestIdRef.current) {
+        setRBudgetLoading(false)
+        console.log("[RBudget/Financial] request ended (budget)", requestId)
+      }
+    }
+  }
+
+  // Phase 4B R User Financial Analysis State
+  const [rFinancialAnalysis, setRFinancialAnalysis] = useState(null)
+  const [rFinancialAnalysisLoading, setRFinancialAnalysisLoading] = useState(false)
+  const [rFinancialAnalysisError, setRFinancialAnalysisError] = useState(null)
+  const financialAnalysisRequestIdRef = useRef(0)
+
+  const fetchRFinancialAnalysis = async (
+    customTx = transactions,
+    customGoals = goals,
+    customRec = recurringExpenses
+  ) => {
+    if (!session?.uid) return null
+
+    const requestId = ++financialAnalysisRequestIdRef.current
+    console.log("[RBudget/Financial] request started", requestId)
+    setRFinancialAnalysisLoading(true)
+
+    try {
+      const result = await getFinancialAnalysis(
+        session.uid,
+        customTx,
+        customGoals,
+        customRec
+      )
+
+      if (requestId !== financialAnalysisRequestIdRef.current) {
+        console.log("[RBudget/Financial] ignoring stale response", requestId)
+        return result
+      }
+
+      const normalizedStatus = Array.isArray(result?.status) ? result.status[0] : result?.status;
+
+      if (result && normalizedStatus === 'success') {
+        setRFinancialAnalysis(result)
+        setRFinancialAnalysisError(null)
+        console.log("[RBudget/Financial] success", requestId)
+        return result
+      } else {
+        const rawMsg = result?.message
+        const msg = (Array.isArray(rawMsg) ? rawMsg[0] : rawMsg) || 'Failed to fetch R financial analysis'
+        setRFinancialAnalysisError(msg)
+        console.log("[RBudget/Financial] error", requestId, msg)
+        return result
+      }
+    } catch (err) {
+      if (requestId === financialAnalysisRequestIdRef.current) {
+        setRFinancialAnalysisError(err.message)
+        console.log("[RBudget/Financial] error", requestId, err.message)
+      }
+      return { status: 'error', message: err.message }
+    } finally {
+      if (requestId === financialAnalysisRequestIdRef.current) {
+        setRFinancialAnalysisLoading(false)
+        console.log("[RBudget/Financial] request ended", requestId)
+      }
+    }
+  }
   
   useEffect(() => {
     if (session?.uid) {
@@ -904,6 +1021,14 @@ export function AppProvider({ children }) {
         clearAllNotifications,
         clearNotifications,
         unreadNotificationCount,
+        rBudgetRecommendation,
+        rBudgetLoading,
+        rBudgetError,
+        fetchRBudgetRecommendation,
+        rFinancialAnalysis,
+        rFinancialAnalysisLoading,
+        rFinancialAnalysisError,
+        fetchRFinancialAnalysis,
       }}
     >
       {children}

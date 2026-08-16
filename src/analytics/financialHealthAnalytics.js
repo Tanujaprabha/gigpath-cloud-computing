@@ -13,6 +13,27 @@ export const getFinancialHealthAnalytics = (data) => {
   const recurringExpenses = data?.recurringExpenses || [];
   const goals = data?.goals || [];
 
+  const totalIncomeAll = transactions
+    .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + toNumber(t.amount), 0);
+
+  // If the user has no income (whether brand new or having only expenses), score is 0
+  if (totalIncomeAll === 0) {
+    return {
+      score: 0,
+      label: transactions.length === 0 && recurringExpenses.length === 0 && goals.length === 0 
+        ? 'New User' 
+        : 'Needs Income',
+      breakdown: {
+        savingsScore: 0,
+        stabilityScore: 0,
+        recurringScore: 0,
+        goalScore: 0,
+        safeToSpendScore: 0,
+      },
+    };
+  }
+
   // 1. Savings Ratio Component (30%)
   const savingsAnalytics = getSavingsAnalytics(data);
   const savingsRatio = savingsAnalytics.savingsRatio || 0;

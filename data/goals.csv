@@ -1,0 +1,3 @@
+"id","uid","goalTitle","purpose","targetAmount","alreadySaved","deadline","monthlyContribution","priority","createdAt"
+"goal-101","test_user_001","Emergency Cushion","Cash buffer for slow demand weeks and repairs.",3000,1650,2026-10-01,270,"priority.high",NA
+"goal-102","test_user_001","Tax Buffer","Stay ahead on quarterly taxes without stress.",2200,920,2026-09-15,220,"priority.high",NA

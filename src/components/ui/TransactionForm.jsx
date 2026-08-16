@@ -124,14 +124,16 @@ export default function TransactionForm({
           </select>
         </label>
 
-        <label className="field">
-          <span>{t('finance.status', 'Status')}</span>
-          <select name="status" value={form.status} onChange={handleChange}>
-            <option value="status.cleared">{t('status.cleared', 'Cleared')}</option>
-            <option value="status.paid">{t('status.paid', 'Paid')}</option>
-            <option value="status.pending">{t('status.pending', 'Pending')}</option>
-          </select>
-        </label>
+        {form.type === 'expense' && (
+          <label className="field">
+            <span>{t('finance.status', 'Status')}</span>
+            <select name="status" value={form.status} onChange={handleChange}>
+              <option value="status.cleared">{t('status.cleared', 'Cleared')}</option>
+              <option value="status.paid">{t('status.paid', 'Paid')}</option>
+              <option value="status.pending">{t('status.pending', 'Pending')}</option>
+            </select>
+          </label>
+        )}
 
         <label className="field field--full">
           <span>Note</span>

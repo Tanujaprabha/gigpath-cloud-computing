@@ -130,6 +130,10 @@ export function getDaysUntil(date) {
 }
 
 export function getFinancialHealthScore(transactions, recurringExpenses, goals) {
+  if (transactions.length === 0 && recurringExpenses.length === 0 && goals.length === 0) {
+    return 0
+  }
+
   const { earningsTotal, expensesTotal, savingsTotal } = getTransactionTotals(transactions)
   const savingsRate = earningsTotal ? savingsTotal / earningsTotal : 0
   const recurringLoad = expensesTotal

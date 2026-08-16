@@ -1,0 +1,5 @@
+"id","uid","title","amount","type","category","date","method","status","note","createdAt"
+"tx-101","test_user_001","Uber Airport Run",210,"income","categories.rideShare",2026-05-05,"methods.bankTransfer","status.cleared","Peak-hour multiplier lifted this shift.",NA
+"tx-102","test_user_001","DoorDash Lunch Rush",124,"income","categories.delivery",2026-05-04,"methods.walletTransfer","status.cleared","Strong lunch demand near downtown offices.",NA
+"tx-103","test_user_001","Fuel Top-Up",48,"expense","categories.fuel",2026-05-04,"methods.card","status.paid","Full tank before airport queue window.",NA
+"tx-104","test_user_001","Mobile Data Plan",29,"expense","categories.phone",2026-05-03,"methods.autopay","status.paid","Essential for navigation and delivery apps.",NA

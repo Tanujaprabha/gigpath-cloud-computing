@@ -77,7 +77,7 @@
     "noNotifications": "No notifications yet.",
     "title": "A calmer view of your money, built for gig work.",
     "description": "Track what you earned, what you spent, and how much room you still have to move today.",
-    "safeToSpend": "Safe to spend today",
+    "safeToSpend": "Safe to spend",
     "safeToSpendDesc": "Your current savings, minus a healthy buffer for recurring costs and near-term operating spend.",
     "financialHealth": "Financial health",
     "savingsRate": "Savings rate",
