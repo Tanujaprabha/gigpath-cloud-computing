@@ -4,8 +4,6 @@ import AppLayout from './components/layout/AppLayout'
 import RequireAuth from './components/RequireAuth'
 import { useAppContext } from './context/AppContext'
 import BudgetRecommendationPage from './pages/ai/BudgetRecommendationPage'
-import ChatPage from './pages/ai/ChatPage'
-import SuggestionsPage from './pages/ai/SuggestionsPage'
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage'
 import LoginPage from './pages/auth/LoginPage'
 import ResetPasswordPage from './pages/auth/ResetPasswordPage'
@@ -27,8 +25,6 @@ import EditGoalPage from './pages/goals/EditGoalPage'
 import CashFlowPage from './pages/insights/CashFlowPage'
 import FinancialHealthPage from './pages/insights/FinancialHealthPage'
 import InsightsOverviewPage from './pages/insights/InsightsOverviewPage'
-import PredictionsPage from './pages/insights/PredictionsPage'
-import WeeklyReportPage from './pages/insights/WeeklyReportPage'
 import EditProfilePage from './pages/profile/EditProfilePage'
 import HelpPage from './pages/profile/HelpPage'
 import PreferencesPage from './pages/profile/PreferencesPage'
@@ -90,9 +86,7 @@ export default function App() {
             <Route path="finance/recurring-expenses/new" element={<AddRecurringExpensePage />} />
 
             <Route path="insights/overview" element={<InsightsOverviewPage />} />
-            <Route path="insights/weekly-report" element={<WeeklyReportPage />} />
             <Route path="insights/cash-flow" element={<CashFlowPage />} />
-            <Route path="insights/predictions" element={<PredictionsPage />} />
             <Route path="insights/financial-health" element={<FinancialHealthPage />} />
 
             <Route path="goals" element={<GoalsListPage />} />
@@ -103,8 +97,6 @@ export default function App() {
             <Route path="goals/:goalId/progress" element={<GoalProgressPage />} />
             <Route path="goals/:goalId/edit" element={<EditGoalPage />} />
 
-            <Route path="ai/chat" element={<ChatPage />} />
-            <Route path="ai/suggestions" element={<SuggestionsPage />} />
             <Route
               path="ai/budget-recommendation"
               element={<BudgetRecommendationPage />}

@@ -1,10 +1,44 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import PageHeader from '../../components/ui/PageHeader'
 import SurfaceCard from '../../components/ui/SurfaceCard'
+import ProgressBar from '../../components/ui/ProgressBar'
 import { useAppContext } from '../../context/AppContext'
 import { formatCurrency, formatDate } from '../../utils/formatters'
 
+const CATEGORY_COLORS = [
+  '#3b82f6', // Blue
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#f97316', // Orange
+  '#64748b', // Slate
+  '#14b8a6', // Teal
+  '#a855f7', // Violet
+]
+
+function extractString(val, fallback = '') {
+  if (val === null || val === undefined) return fallback
+  if (Array.isArray(val)) return extractString(val[0], fallback)
+  if (typeof val === 'string') return val
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val)
+  if (typeof val === 'object') {
+    return extractString(val.label || val.name || val.category || val.key || val.title || val.id || fallback)
+  }
+  return String(val)
+}
+
+function extractNumber(val, fallback = 0) {
+  if (val === null || val === undefined) return fallback
+  if (Array.isArray(val)) return extractNumber(val[0], fallback)
+  const num = Number(val)
+  return isNaN(num) ? fallback : num
+}
+
 export default function CashFlowPage() {
+  const { t } = useTranslation()
   const { 
     session,
     dataLoading,
@@ -12,6 +46,7 @@ export default function CashFlowPage() {
     recurringExpenses,
     transactions,
     goals,
+    totals,
     rFinancialAnalysis,
     rFinancialAnalysisLoading,
     rFinancialAnalysisError,
@@ -19,290 +54,549 @@ export default function CashFlowPage() {
   } = useAppContext()
 
   useEffect(() => {
-    if (session?.uid && !dataLoading && !rFinancialAnalysis && !rFinancialAnalysisLoading) {
+    if (session?.uid && !dataLoading) {
       fetchRFinancialAnalysis(transactions, goals, recurringExpenses)
     }
-  }, [session?.uid, dataLoading, transactions.length, goals.length, recurringExpenses.length, rFinancialAnalysis, rFinancialAnalysisLoading])
+  }, [session?.uid, dataLoading, transactions, goals, recurringExpenses])
 
-  const averageNet =
-    weeklyTrend.reduce((sum, day) => sum + day.net, 0) / (weeklyTrend.length || 1)
-  const nextRecurring = [...recurringExpenses].sort(
-    (left, right) => new Date(left.nextCharge) - new Date(right.nextCharge),
-  )[0]
-
-  const normalizedAnalysisStatus = Array.isArray(rFinancialAnalysis?.status) ? rFinancialAnalysis.status[0] : rFinancialAnalysis?.status
+  const rawStatus = rFinancialAnalysis?.status
+  const normalizedAnalysisStatus = extractString(rawStatus)
   const isConnected = rFinancialAnalysis && normalizedAnalysisStatus === 'success'
   const analysisData = rFinancialAnalysis?.analysis
   const summary = analysisData?.transaction_summary
   const catAnalysis = analysisData?.category_analysis?.categories || {}
-  const monthlyAnalysis = analysisData?.monthly_analysis || {}
-  const incVar = analysisData?.income_variability
   const expVar = analysisData?.expense_variability
+  const incVar = analysisData?.income_variability
+  const indicators = analysisData?.financial_indicators
   const recAnalysis = analysisData?.recurring_expenses
   const goalAnalysis = analysisData?.goals
-  const indicators = analysisData?.financial_indicators
-  const limitations = rFinancialAnalysis?.data_limitations || []
-  const dataQuality = rFinancialAnalysis?.data_quality
+
+  // 1. MONEY OVERVIEW (Defensive extraction with AppContext totals fallback)
+  const totalIncome = summary 
+    ? extractNumber(summary.total_income, totals.earningsTotal || 0) 
+    : (totals.earningsTotal || 0)
+
+  const totalExpenses = summary 
+    ? extractNumber(summary.total_expenses, totals.expensesTotal || 0) 
+    : (totals.expensesTotal || 0)
+
+  const netCashFlow = summary 
+    ? extractNumber(summary.net_cash_flow, totals.savingsTotal || 0) 
+    : (totals.savingsTotal || 0)
+
+  const fallbackSavingsRate = totalIncome > 0 ? Math.round((netCashFlow / totalIncome) * 100) : 0
+  const savingsRate = summary && summary.savings_rate_percent !== undefined
+    ? extractNumber(summary.savings_rate_percent, fallbackSavingsRate)
+    : fallbackSavingsRate
+
+  // 2. INCOME VS EXPENSES COMPARISON
+  const totalVolume = totalIncome + totalExpenses
+  const incomePct = totalVolume > 0 ? Math.round((totalIncome / totalVolume) * 100) : 0
+  const expensePct = totalVolume > 0 ? Math.round((totalExpenses / totalVolume) * 100) : 0
+
+  // 3. SPENDING BREAKDOWN (Defensive category breakdown)
+  const processedCategories = (() => {
+    if (Object.keys(catAnalysis).length > 0) {
+      return Object.entries(catAnalysis).map(([catKey, catObj], idx) => {
+        const rawCategory = catObj && typeof catObj === 'object' 
+          ? (catObj.category || catObj.name || catObj.label || catKey)
+          : (catObj || catKey)
+        const strKey = extractString(rawCategory, extractString(catKey, 'Uncategorized'))
+        const displayName = strKey.startsWith('categories.') ? t(strKey) : (strKey || 'Uncategorized')
+
+        return {
+          key: extractString(catKey, `cat-${idx}`),
+          name: displayName,
+          amount: extractNumber(catObj?.total_spending ?? catObj?.amount, 0),
+          percentage: extractNumber(catObj?.percentage_of_total_expenses ?? catObj?.percentage, 0),
+          count: extractNumber(catObj?.transaction_count ?? catObj?.count, 0),
+          color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length]
+        }
+      })
+    }
+
+    // Fallback: derive categories defensively from local transactions
+    const expenseTx = transactions.filter(t => t.type === 'expense')
+    if (expenseTx.length === 0) return []
+
+    const map = {}
+    let sumTotal = 0
+    expenseTx.forEach(tx => {
+      const rawCat = tx.category || 'Other'
+      const strCat = extractString(rawCat, 'Other')
+      const amt = extractNumber(tx.amount, 0)
+      sumTotal += amt
+      if (!map[strCat]) map[strCat] = { amount: 0, count: 0 }
+      map[strCat].amount += amt
+      map[strCat].count += 1
+    })
+
+    return Object.entries(map).map(([catKey, val], idx) => {
+      const strKey = extractString(catKey, 'Uncategorized')
+      const displayName = strKey.startsWith('categories.') ? t(strKey) : (strKey || 'Uncategorized')
+      return {
+        key: strKey || `cat-${idx}`,
+        name: displayName,
+        amount: val.amount,
+        percentage: sumTotal > 0 ? Math.round((val.amount / sumTotal) * 100) : 0,
+        count: val.count,
+        color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length]
+      }
+    })
+  })()
+
+  // SVG Donut Slices Calculation
+  const totalCategoryAmount = processedCategories.reduce((acc, c) => acc + c.amount, 0)
+  const donutCircumference = 2 * Math.PI * 70 // r = 70 => 439.82
+  let accumulatedOffset = 0
+  const donutSlices = processedCategories.map(cat => {
+    const share = totalCategoryAmount > 0 ? cat.amount / totalCategoryAmount : 0
+    const dashLength = share * donutCircumference
+    const gapLength = donutCircumference - dashLength
+    const offset = accumulatedOffset
+    accumulatedOffset += dashLength
+    return {
+      ...cat,
+      dashArray: `${dashLength.toFixed(2)} ${gapLength.toFixed(2)}`,
+      dashOffset: -offset
+    }
+  })
+
+  // 4. CASH FLOW TREND
+  const maxTrendVal = Math.max(
+    ...weeklyTrend.flatMap((day) => [
+      extractNumber(day.income, 0), 
+      extractNumber(day.expense, 0), 
+      Math.abs(extractNumber(day.net, 0))
+    ]),
+    1
+  )
+
+  // 5. SPENDING PATTERN INTERPRETATION
+  const rawCv = expVar && expVar.cv !== undefined ? extractNumber(expVar.cv, null) : null
+  const expMean = expVar && expVar.mean !== undefined ? extractNumber(expVar.mean, null) : null
+  const incMean = incVar && incVar.mean !== undefined ? extractNumber(incVar.mean, null) : null
+
+  let spendingPatternText = 'Add more transactions to view your spending pattern stability.'
+  let spendingPatternTone = 'neutral'
+
+  if (rawCv !== null && !isNaN(rawCv)) {
+    if (rawCv < 0.5) {
+      spendingPatternText = 'Your spending is consistent and predictable.'
+      spendingPatternTone = 'positive'
+    } else if (rawCv <= 1.0) {
+      spendingPatternText = 'Your spending shows moderate variation.'
+      spendingPatternTone = 'warning'
+    } else {
+      spendingPatternText = 'Your spending varies significantly from period to period.'
+      spendingPatternTone = 'negative'
+    }
+  }
+
+  // 6. RECURRING PAYMENTS
+  const fallbackRecurringSum = recurringExpenses.reduce((sum, item) => sum + extractNumber(item.amount, 0), 0)
+  const totalRecurringAmount = recAnalysis && recAnalysis.total_recurring_monthly !== undefined
+    ? extractNumber(recAnalysis.total_recurring_monthly, fallbackRecurringSum)
+    : fallbackRecurringSum
+  const recurringCount = recurringExpenses.length
+  const nextRecurring = [...recurringExpenses].sort(
+    (left, right) => new Date(left.nextCharge) - new Date(right.nextCharge)
+  )[0]
+
+  // 7. GOALS PROGRESS
+  const fallbackGoalSaved = goals.reduce((sum, g) => sum + extractNumber(g.savedAmount, 0), 0)
+  const fallbackGoalTarget = goals.reduce((sum, g) => sum + extractNumber(g.targetAmount, 0), 0)
+  
+  const totalGoalSaved = goalAnalysis && goalAnalysis.total_saved_amount !== undefined
+    ? extractNumber(goalAnalysis.total_saved_amount, fallbackGoalSaved)
+    : fallbackGoalSaved
+
+  const totalGoalTarget = goalAnalysis && goalAnalysis.total_target_amount !== undefined
+    ? extractNumber(goalAnalysis.total_target_amount, fallbackGoalTarget)
+    : fallbackGoalTarget
+
+  const fallbackGap = Math.max(totalGoalTarget - totalGoalSaved, 0)
+  const remainingGoalGap = indicators && indicators.goal_funding_gap !== undefined
+    ? extractNumber(indicators.goal_funding_gap, fallbackGap)
+    : fallbackGap
+
+  const overallGoalProgressPct = totalGoalTarget > 0 
+    ? Math.min(Math.round((totalGoalSaved / totalGoalTarget) * 100), 100) 
+    : 0
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow="Insights"
-        title="Cash Flow & R Financial Analysis"
-        description="Near-term money movement integrated with user-level statistical financial analysis from R."
-      />
-
-      {/* R Server Status & Connection Header */}
-      <SurfaceCard>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>R Financial Analysis Service (Current User)</h3>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', opacity: 0.8 }}>
-              Endpoint: <code>POST http://localhost:8000/financial-analysis/user</code>
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span 
+        title="Cash Flow & Insights"
+        description="Clear, actionable visibility into your money movement, spending breakdown, and financial momentum."
+        actions={
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span
               style={{
-                padding: '4px 12px',
-                borderRadius: '16px',
+                padding: '6px 14px',
+                borderRadius: '99px',
                 fontSize: '0.8rem',
                 fontWeight: 600,
-                backgroundColor: isConnected ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                color: isConnected ? '#22c55e' : '#ef4444',
-                border: `1px solid ${isConnected ? '#22c55e' : '#ef4444'}`
+                backgroundColor: isConnected 
+                  ? 'rgba(34, 197, 94, 0.12)' 
+                  : 'rgba(59, 130, 246, 0.12)',
+                color: isConnected ? '#16a34a' : '#2563eb',
+                border: `1px solid ${isConnected ? 'rgba(34, 197, 94, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`
               }}
             >
               {rFinancialAnalysisLoading 
-                ? 'Calculating in R...' 
+                ? 'Updating...' 
                 : isConnected 
-                  ? 'R Server Online (200 OK)' 
-                  : (rFinancialAnalysisError?.includes('500') || rFinancialAnalysisError?.includes('API Error'))
-                    ? 'R API Error'
-                    : 'R Server Offline'}
+                  ? 'Insights Updated' 
+                  : 'Analysis Active'}
             </span>
-            <button 
-              onClick={() => fetchRFinancialAnalysis()} 
+            <button
+              onClick={() => fetchRFinancialAnalysis()}
               disabled={rFinancialAnalysisLoading}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                cursor: rFinancialAnalysisLoading ? 'not-allowed' : 'pointer',
-                backgroundColor: 'var(--accent-blue, #3b82f6)',
-                color: '#fff',
-                border: 'none'
-              }}
+              className="button button--secondary"
+              style={{ padding: '8px 16px', fontSize: '0.85rem' }}
             >
-              {rFinancialAnalysisLoading ? 'Processing...' : 'Run R Analysis'}
+              {rFinancialAnalysisLoading ? 'Updating...' : 'Refresh Insights'}
             </button>
           </div>
-        </div>
+        }
+      />
 
-        {rFinancialAnalysisError && (
-          <div style={{ 
-            padding: '12px', 
-            borderRadius: '8px', 
-            backgroundColor: 'rgba(239, 68, 68, 0.1)', 
-            border: '1px solid #ef4444',
-            color: '#ef4444',
-            fontSize: '0.85rem',
-            marginTop: '8px'
-          }}>
-            <strong>Connection Error:</strong> {rFinancialAnalysisError}
-          </div>
-        )}
-      </SurfaceCard>
+      {rFinancialAnalysisError && (
+        <SurfaceCard style={{ borderColor: 'rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.04)' }}>
+          <p style={{ margin: 0, color: '#ef4444', fontSize: '0.875rem' }}>
+            <strong>Notice:</strong> Unable to refresh analysis. Showing latest cached financial metrics.
+          </p>
+        </SurfaceCard>
+      )}
 
-      {/* R Financial Analysis Section */}
-      {isConnected && summary ? (
-        <>
-          {/* Key Metrics Grid */}
-          <div className="content-grid">
-            <SurfaceCard className="surface-card--accent">
-              <span className="eyebrow">R Total Income</span>
-              <h2>{formatCurrency(summary.total_income)}</h2>
-              <p>Income transactions count: {summary.income_transactions_count}</p>
-            </SurfaceCard>
-
-            <SurfaceCard>
-              <span className="eyebrow">R Total Expenses</span>
-              <h2>{formatCurrency(summary.total_expenses)}</h2>
-              <p>Expense transactions count: {summary.expense_transactions_count}</p>
-            </SurfaceCard>
-
-            <SurfaceCard>
-              <span className="eyebrow">R Net Cash Flow</span>
-              <h2 className={summary.net_cash_flow >= 0 ? 'text-positive' : 'text-negative'}>
-                {formatCurrency(summary.net_cash_flow)}
-              </h2>
-              <p>Savings Rate: <strong>{summary.savings_rate_percent}%</strong></p>
-            </SurfaceCard>
-          </div>
-
-          {/* R Statistical Variability & Indicators */}
-          <SurfaceCard>
-            <div className="section-heading">
-              <h2>R Statistical Income & Expense Variability</h2>
-              <p>Descriptive metrics calculated directly on your authenticated dataset.</p>
-            </div>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '12px' }}>
-              <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#22c55e' }}>Income Variability</h4>
-                <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div>Average: <strong>{incVar ? formatCurrency(incVar.mean) : 'N/A'}</strong></div>
-                  <div>Median: <strong>{incVar ? formatCurrency(incVar.median) : 'N/A'}</strong></div>
-                  <div>Std Dev: <strong>{incVar && typeof incVar.sd === 'number' ? formatCurrency(incVar.sd) : String(incVar?.sd)}</strong></div>
-                  <div>Coefficient of Variation: <strong>{incVar && typeof incVar.cv === 'number' ? incVar.cv : String(incVar?.cv)}</strong></div>
-                </div>
-              </div>
-
-              <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)' }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#ef4444' }}>Expense Variability</h4>
-                <div style={{ fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div>Average: <strong>{expVar ? formatCurrency(expVar.mean) : 'N/A'}</strong></div>
-                  <div>Median: <strong>{expVar ? formatCurrency(expVar.median) : 'N/A'}</strong></div>
-                  <div>Std Dev: <strong>{expVar && typeof expVar.sd === 'number' ? formatCurrency(expVar.sd) : String(expVar?.sd)}</strong></div>
-                  <div>Coefficient of Variation: <strong>{expVar && typeof expVar.cv === 'number' ? expVar.cv : String(expVar?.cv)}</strong></div>
-                </div>
-              </div>
-            </div>
-          </SurfaceCard>
-
-          {/* R Category & Monthly Cash Flow Breakdown */}
-          {Object.keys(catAnalysis).length > 0 && (
-            <SurfaceCard>
-              <div className="section-heading">
-                <h2>R Category Expense Distribution</h2>
-                <p>Categorical expenditure distribution across your transactions.</p>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', textAlign: 'left' }}>
-                    <th style={{ padding: '8px' }}>Category</th>
-                    <th style={{ padding: '8px' }}>Total Spend</th>
-                    <th style={{ padding: '8px' }}>Share of Total</th>
-                    <th style={{ padding: '8px' }}>Average Expense</th>
-                    <th style={{ padding: '8px' }}>Count</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(catAnalysis).map(([catKey, catObj], idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '8px', fontWeight: 600 }}>{catObj.category || catKey}</td>
-                      <td style={{ padding: '8px' }}>{formatCurrency(catObj.total_spending)}</td>
-                      <td style={{ padding: '8px' }}>{catObj.percentage_of_total_expenses}%</td>
-                      <td style={{ padding: '8px' }}>{formatCurrency(catObj.average_expense)}</td>
-                      <td style={{ padding: '8px' }}>{catObj.transaction_count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </SurfaceCard>
-          )}
-
-          {/* R Indicators & Recurring Burden */}
-          {indicators && (
-            <SurfaceCard>
-              <div className="section-heading">
-                <h2>R Financial Indicators & Obligations</h2>
-                <p>Key ratios and obligations derived from R analysis.</p>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', fontSize: '0.85rem', marginTop: '12px' }}>
-                <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>Expense-to-Income Ratio</div>
-                  <div style={{ fontSize: '1rem', fontWeight: 600 }}>{indicators.expense_to_income_ratio_percent}%</div>
-                </div>
-                <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>Recurring Expense Burden</div>
-                  <div style={{ fontSize: '1rem', fontWeight: 600 }}>{indicators.recurring_expense_burden_percent}%</div>
-                </div>
-                <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>Goal Funding Gap</div>
-                  <div style={{ fontSize: '1rem', fontWeight: 600, color: '#f59e0b' }}>{formatCurrency(indicators.goal_funding_gap)}</div>
-                </div>
-              </div>
-            </SurfaceCard>
-          )}
-
-          {/* R Limitations & Data Quality */}
-          {dataQuality && (
-            <SurfaceCard style={{ fontSize: '0.8rem', opacity: 0.85 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span>User Transactions Analyzed: <strong>{dataQuality.transactions_used}</strong></span>
-                <span>Goals Analyzed: <strong>{dataQuality.goals_used}</strong></span>
-                <span>Recurring Expenses Analyzed: <strong>{dataQuality.recurring_expenses_used}</strong></span>
-              </div>
-              {limitations.length > 0 && (
-                <div style={{ marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
-                  <strong>R Analysis Declarations:</strong>
-                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                    {limitations.map((lim, i) => (
-                      <li key={i}>{lim}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </SurfaceCard>
-          )}
-        </>
-      ) : null}
-
-      {/* Standard GigPath Rolling 7-Day View (Preserved Existing UI) */}
+      {/* 1. MONEY OVERVIEW GRID */}
       <div className="content-grid">
         <SurfaceCard className="surface-card--accent">
-          <span className="eyebrow">Average daily net (7-Day Rolling)</span>
-          <h2>{formatCurrency(averageNet)}</h2>
-          <p>Based on the current rolling 7-day view.</p>
+          <span className="eyebrow">Total Income</span>
+          <h2 className="text-positive">{formatCurrency(totalIncome)}</h2>
+          <p>Earnings captured across all logged activity.</p>
         </SurfaceCard>
 
         <SurfaceCard>
+          <span className="eyebrow">Total Expenses</span>
+          <h2 className="text-negative">{formatCurrency(totalExpenses)}</h2>
+          <p>Operating outflow and recurring commitments.</p>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <span className="eyebrow">Net Cash Flow</span>
+          <h2 className={netCashFlow >= 0 ? 'text-positive' : 'text-negative'}>
+            {formatCurrency(netCashFlow)}
+          </h2>
+          <p>Net margin remaining after spending.</p>
+        </SurfaceCard>
+
+        <SurfaceCard>
+          <span className="eyebrow">Savings Rate</span>
+          <h2>{savingsRate}%</h2>
+          <p>Percentage of income retained.</p>
+        </SurfaceCard>
+      </div>
+
+      {/* 2. INCOME VS EXPENSES & 3. SPENDING BREAKDOWN */}
+      <div className="content-grid content-grid--wide">
+        {/* Income vs Expenses Bar Chart */}
+        <SurfaceCard>
           <div className="section-heading">
-            <h2>Next fixed charge</h2>
-            <p>What is coming up first on your recurring calendar.</p>
+            <h2>Income vs Expenses</h2>
+            <p>Visual proportion of inflow compared to operating outflow.</p>
           </div>
-          {nextRecurring ? (
-            <div className="detail-grid detail-grid--compact">
+
+          {totalVolume > 0 ? (
+            <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <span>Expense</span>
-                <strong>{nextRecurring.title}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--positive)' }}>Income</span>
+                  <strong>{formatCurrency(totalIncome)} ({incomePct}%)</strong>
+                </div>
+                <div style={{ height: '12px', borderRadius: '6px', background: 'var(--bg-strong)', overflow: 'hidden' }}>
+                  <div 
+                    style={{ 
+                      width: `${incomePct}%`, 
+                      height: '100%', 
+                      background: '#10b981', 
+                      borderRadius: '6px',
+                      transition: 'width 0.4s ease'
+                    }} 
+                  />
+                </div>
               </div>
+
               <div>
-                <span>Due date</span>
-                <strong>{formatDate(nextRecurring.nextCharge)}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--negative)' }}>Expenses</span>
+                  <strong>{formatCurrency(totalExpenses)} ({expensePct}%)</strong>
+                </div>
+                <div style={{ height: '12px', borderRadius: '6px', background: 'var(--bg-strong)', overflow: 'hidden' }}>
+                  <div 
+                    style={{ 
+                      width: `${expensePct}%`, 
+                      height: '100%', 
+                      background: '#ef4444', 
+                      borderRadius: '6px',
+                      transition: 'width 0.4s ease'
+                    }} 
+                  />
+                </div>
               </div>
-              <div>
-                <span>Amount</span>
-                <strong>{formatCurrency(nextRecurring.amount)}</strong>
+
+              <div style={{ marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Net Retention:</span>
+                <strong className={netCashFlow >= 0 ? 'text-positive' : 'text-negative'}>
+                  {formatCurrency(netCashFlow)} ({savingsRate}%)
+                </strong>
               </div>
             </div>
           ) : (
-            <p style={{ color: 'var(--text-muted)', padding: '12px 0' }}>No upcoming recurring expenses.</p>
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No income or expense activity logged yet.
+            </div>
+          )}
+        </SurfaceCard>
+
+        {/* Spending Breakdown Donut Chart */}
+        <SurfaceCard>
+          <div className="section-heading">
+            <h2>Spending Breakdown</h2>
+            <p>Expense distribution across active spending categories.</p>
+          </div>
+
+          {processedCategories.length > 0 && totalCategoryAmount > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '20px', alignItems: 'center', marginTop: '1rem' }}>
+              {/* Responsive SVG Donut Chart */}
+              <div style={{ position: 'relative', width: '140px', height: '140px' }}>
+                <svg viewBox="0 0 160 160" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
+                  <circle cx="80" cy="80" r="70" stroke="var(--bg-strong)" strokeWidth="18" fill="none" />
+                  {donutSlices.map((slice) => (
+                    <circle
+                      key={slice.key}
+                      cx="80"
+                      cy="80"
+                      r="70"
+                      stroke={slice.color}
+                      strokeWidth="18"
+                      strokeDasharray={slice.dashArray}
+                      strokeDashoffset={slice.dashOffset}
+                      fill="none"
+                      style={{ transition: 'stroke-dasharray 0.4s ease, stroke-dashoffset 0.4s ease' }}
+                    >
+                      <title>{`${slice.name}: ${formatCurrency(slice.amount)} (${slice.percentage}%)`}</title>
+                    </circle>
+                  ))}
+                </svg>
+              </div>
+
+              {/* Category Legend */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                {processedCategories.map((cat) => (
+                  <div key={cat.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                      <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color, flexShrink: 0 }} />
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cat.name}</span>
+                    </div>
+                    <strong style={{ marginLeft: '12px', flexShrink: 0 }}>{formatCurrency(cat.amount)} ({cat.percentage}%)</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No expense categories available. Add expense transactions to visualize category breakdown.
+            </div>
           )}
         </SurfaceCard>
       </div>
 
+      {/* 4. CASH FLOW TREND CHART */}
       <SurfaceCard>
         <div className="section-heading">
-          <h2>Recent daily net</h2>
-          <p>Positive days create room. Negative days signal where adjustments may help.</p>
+          <h2>Cash Flow Trend</h2>
+          <p>Daily net momentum derived from recent transaction activity.</p>
         </div>
-        <div className="simple-list">
-          {weeklyTrend.map((day) => (
-            <div key={day.date} className="simple-list__item">
-              <div>
-                <strong>{day.label}</strong>
-                <span>
-                  Income {formatCurrency(day.income)} • Expenses {formatCurrency(day.expense)}
-                </span>
-              </div>
-              <strong className={day.net >= 0 ? 'text-positive' : 'text-negative'}>
-                {formatCurrency(day.net)}
-              </strong>
+
+        {weeklyTrend && weeklyTrend.length > 0 ? (
+          <div style={{ marginTop: '1rem' }}>
+            <div className="mini-chart" style={{ height: '160px', alignItems: 'flex-end', display: 'flex', gap: '16px' }}>
+              {weeklyTrend.map((day) => {
+                const dayInc = extractNumber(day.income, 0)
+                const dayExp = extractNumber(day.expense, 0)
+                const dayLabel = extractString(day.label, '')
+                return (
+                  <div key={extractString(day.date, dayLabel)} className="mini-chart__column" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
+                    <div className="mini-chart__bars" style={{ width: '100%', height: '120px', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '4px' }}>
+                      <span
+                        className="mini-chart__bar mini-chart__bar--income"
+                        style={{ 
+                          height: `${(dayInc / maxTrendVal) * 100}%`,
+                          width: '12px',
+                          borderRadius: '3px',
+                          background: '#10b981'
+                        }}
+                        title={`Income: ${formatCurrency(dayInc)}`}
+                      />
+                      <span
+                        className="mini-chart__bar mini-chart__bar--expense"
+                        style={{ 
+                          height: `${(dayExp / maxTrendVal) * 100}%`,
+                          width: '12px',
+                          borderRadius: '3px',
+                          background: '#ef4444'
+                        }}
+                        title={`Expenses: ${formatCurrency(dayExp)}`}
+                      />
+                    </div>
+                    <strong style={{ fontSize: '0.75rem', marginTop: '8px', color: 'var(--text-muted)' }}>{dayLabel}</strong>
+                  </div>
+                )
+              })}
             </div>
-          ))}
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '24px', marginTop: '1rem', fontSize: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#10b981' }} />
+                <span>Daily Inflow</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#ef4444' }} />
+                <span>Daily Outflow</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            No recent daily transaction data available to plot trend.
+          </div>
+        )}
+      </SurfaceCard>
+
+      {/* 5. SPENDING PATTERN & 6. RECURRING PAYMENTS */}
+      <div className="content-grid">
+        {/* Spending Pattern Card */}
+        <SurfaceCard>
+          <div className="section-heading">
+            <h2>Spending Pattern</h2>
+            <p>Analysis of your spending consistency and variability.</p>
+          </div>
+
+          <div style={{ marginTop: '1rem' }}>
+            <div 
+              style={{ 
+                padding: '14px 16px', 
+                borderRadius: '12px', 
+                background: spendingPatternTone === 'positive' 
+                  ? 'rgba(34, 197, 94, 0.08)' 
+                  : spendingPatternTone === 'warning' 
+                    ? 'rgba(245, 158, 11, 0.08)' 
+                    : 'rgba(239, 68, 68, 0.08)',
+                border: `1px solid ${
+                  spendingPatternTone === 'positive' 
+                    ? 'rgba(34, 197, 94, 0.3)' 
+                    : spendingPatternTone === 'warning' 
+                      ? 'rgba(245, 158, 11, 0.3)' 
+                      : 'rgba(239, 68, 68, 0.3)'
+                }`
+              }}
+            >
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '0.95rem' }}>Stability Assessment</h4>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)', fontWeight: 500 }}>
+                {spendingPatternText}
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '1rem', fontSize: '0.85rem' }}>
+              <div style={{ padding: '10px 12px', background: 'var(--bg-strong)', borderRadius: '8px' }}>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem' }}>Average Expense / Tx</span>
+                <strong>{expMean !== null ? formatCurrency(expMean) : 'N/A'}</strong>
+              </div>
+              <div style={{ padding: '10px 12px', background: 'var(--bg-strong)', borderRadius: '8px' }}>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem' }}>Average Income / Tx</span>
+                <strong>{incMean !== null ? formatCurrency(incMean) : 'N/A'}</strong>
+              </div>
+            </div>
+          </div>
+        </SurfaceCard>
+
+        {/* Recurring Payments Card */}
+        <SurfaceCard>
+          <div className="section-heading">
+            <h2>Recurring Payments</h2>
+            <p>Fixed monthly commitments and upcoming schedule.</p>
+          </div>
+
+          <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ padding: '12px', background: 'var(--bg-strong)', borderRadius: '8px' }}>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem' }}>Total Monthly Fixed</span>
+                <strong style={{ fontSize: '1.1rem' }}>{formatCurrency(totalRecurringAmount)}</strong>
+              </div>
+              <div style={{ padding: '12px', background: 'var(--bg-strong)', borderRadius: '8px' }}>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.75rem' }}>Active Recurring Count</span>
+                <strong style={{ fontSize: '1.1rem' }}>{recurringCount}</strong>
+              </div>
+            </div>
+
+            {nextRecurring ? (
+              <div style={{ padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Next Upcoming Charge</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <strong>{extractString(nextRecurring.title, 'Recurring Charge')}</strong>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Due {formatDate(nextRecurring.nextCharge)}</div>
+                  </div>
+                  <strong className="text-negative">{formatCurrency(extractNumber(nextRecurring.amount, 0))}</strong>
+                </div>
+              </div>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center', padding: '8px' }}>
+                No active recurring commitments scheduled.
+              </p>
+            )}
+          </div>
+        </SurfaceCard>
+      </div>
+
+      {/* 7. GOAL PROGRESS */}
+      <SurfaceCard>
+        <div className="section-heading">
+          <h2>Goal Progress & Funding Gap</h2>
+          <p>Overall reserve build across active financial targets.</p>
         </div>
+
+        {goals && goals.length > 0 ? (
+          <div style={{ marginTop: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '1.25rem' }}>
+              <div>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Saved So Far</span>
+                <h3 style={{ margin: '4px 0 0 0', color: 'var(--positive)' }}>{formatCurrency(totalGoalSaved)}</h3>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Target Amount</span>
+                <h3 style={{ margin: '4px 0 0 0' }}>{formatCurrency(totalGoalTarget)}</h3>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Remaining Funding Gap</span>
+                <h3 style={{ margin: '4px 0 0 0', color: '#f59e0b' }}>{formatCurrency(remainingGoalGap)}</h3>
+              </div>
+            </div>
+
+            <ProgressBar
+              value={overallGoalProgressPct}
+              label="Overall Portfolio Progress"
+              helper={`${overallGoalProgressPct}% funding completed across ${goals.length} active goal${goals.length > 1 ? 's' : ''}`}
+            />
+          </div>
+        ) : (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            No financial goals set up yet. Create a goal to track your savings runway.
+          </div>
+        )}
       </SurfaceCard>
     </div>
   )

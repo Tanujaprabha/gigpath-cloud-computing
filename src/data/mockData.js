@@ -50,9 +50,7 @@ export const sidebarSections = [
     mainTo: '/app/insights/overview',
     children: [
       { label: 'Overview', to: '/app/insights/overview' },
-      { label: 'Weekly Report', to: '/app/insights/weekly-report' },
       { label: 'Cash Flow', to: '/app/insights/cash-flow' },
-      { label: 'Predictions', to: '/app/insights/predictions' },
       { label: 'Financial Health', to: '/app/insights/financial-health' },
     ],
   },
@@ -70,16 +68,11 @@ export const sidebarSections = [
     ],
   },
   {
-    key: 'ai',
-    label: 'AI',
-    icon: 'ai',
-    basePath: '/app/ai',
-    mainTo: '/app/ai/chat',
-    children: [
-      { label: 'Chat', to: '/app/ai/chat' },
-      { label: 'Suggestions', to: '/app/ai/suggestions' },
-      { label: 'Budget Recommendation', to: '/app/ai/budget-recommendation' },
-    ],
+    key: 'budgetRecommendation',
+    label: 'Budget Recommendation',
+    icon: 'spark',
+    basePath: '/app/ai/budget-recommendation',
+    mainTo: '/app/ai/budget-recommendation',
   },
   {
     key: 'profile',

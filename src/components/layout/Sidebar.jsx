@@ -19,7 +19,6 @@ export default function Sidebar({ isOpen, onClose }) {
     finance: true,
     insights: false,
     goals: false,
-    ai: false,
     profile: false,
   })
 
@@ -69,7 +68,7 @@ export default function Sidebar({ isOpen, onClose }) {
                 <span className="sidebar-link__icon">
                   <Icon name={section.icon} size={18} />
                 </span>
-                <span>{t(`sidebar.${section.key}`)}</span>
+                <span>{t(`sidebar.${section.key}`, section.label)}</span>
               </NavLink>
             )
           }

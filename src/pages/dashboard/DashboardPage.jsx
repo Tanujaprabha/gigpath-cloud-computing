@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import PageHeader from '../../components/ui/PageHeader'
@@ -11,11 +12,13 @@ import { formatCurrency, formatDate, formatPercent, formatTimeAgo } from '../../
 export default function DashboardPage() {
   const { t } = useTranslation()
   const {
+    transactions,
     totals,
     recentTransactions,
     goals,
     recurringExpenses,
     safeToSpendToday,
+    monthlyBudgetLimit,
     financialHealthScore,
     aiInsights,
     aiSafeToSpendExplanation,
@@ -28,8 +31,25 @@ export default function DashboardPage() {
     spendingAnalytics,
   } = useAppContext()
 
-  const unreadNotifications = notifications.filter(n => !n.read)
-  const recentNotifications = notifications.slice(0, 3)
+  // Dynamic Current-Month Calculations (MUST BE CALLED UNCONDITIONALLY AT TOP TO OBEY REACT HOOK RULES)
+  const today = useMemo(() => new Date(), [])
+  const currentYear = today.getFullYear()
+  const currentMonth = today.getMonth()
+
+  // 1. Current calendar month expense total
+  const currentMonthSpending = useMemo(() => {
+    return (transactions || [])
+      .filter((t) => {
+        if (t?.type !== 'expense') return false
+        if (!t?.date) return false
+        const d = new Date(t.date)
+        return !isNaN(d.getTime()) && d.getFullYear() === currentYear && d.getMonth() === currentMonth
+      })
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+  }, [transactions, currentYear, currentMonth])
+
+  const unreadNotifications = (notifications || []).filter(n => !n.read)
+  const recentNotifications = (notifications || []).slice(0, 3)
 
   if (authLoading || dataLoading || profileLoading) {
     return (
@@ -47,19 +67,24 @@ export default function DashboardPage() {
     )
   }
 
-  const savingsRate = totals.earningsTotal
+  const savingsRate = totals?.earningsTotal
     ? (totals.savingsTotal / totals.earningsTotal) * 100
     : 0
-  const upcomingRecurring = recurringExpenses.slice(0, 3)
+  const upcomingRecurring = (recurringExpenses || []).slice(0, 3)
 
-  // Safe to Spend / Day Logic
-  const today = new Date();
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-  const remainingDays = endOfMonth.getDate() - today.getDate() + 1;
-  const currentMonthExpenses = spendingAnalytics?.totalMonthlySpending || 0;
-  const monthlyBudget = profile?.monthlyBudget || totals.earningsTotal || 0;
-  const remainingBudget = monthlyBudget - currentMonthExpenses;
-  const safeToSpendPerDay = (remainingBudget > 0 && remainingDays > 0) ? (remainingBudget / remainingDays) : 0;
+  // 2. Remaining Days in current month (inclusive of today)
+  const daysInMonthTotal = new Date(currentYear, currentMonth + 1, 0).getDate()
+  const remainingDays = Math.max(daysInMonthTotal - today.getDate() + 1, 1)
+
+  // 3. Remaining Budget for current month
+  const remainingBudget = monthlyBudgetLimit !== null
+    ? Math.max(monthlyBudgetLimit - currentMonthSpending, 0)
+    : null
+
+  // 4. Daily Spending Guide (Remaining Budget / Remaining Days)
+  const dailySpendingGuide = remainingBudget !== null && remainingDays > 0
+    ? (remainingBudget / remainingDays)
+    : null
 
   return (
     <div className="page-stack">
@@ -76,17 +101,12 @@ export default function DashboardPage() {
 
       <div className="hero-grid">
         <SurfaceCard className="surface-card--accent hero-card">
-          <span className="eyebrow">{t('dashboard.safeToSpend')}</span>
-          <h2>{formatCurrency(safeToSpendToday)}</h2>
+          <span className="eyebrow">Monthly Spending Limit</span>
+          <h2>{monthlyBudgetLimit !== null ? formatCurrency(monthlyBudgetLimit) : 'Calculating...'}</h2>
           <p>
-            {aiLoading ? (
-               <span style={{opacity: 0.7}}>{t('dashboard.safeToSpendDesc')} (AI Analyzing...)</span>
-            ) : aiSafeToSpendExplanation ? (
-               aiSafeToSpendExplanation
-            ) : (
-               t('dashboard.safeToSpendDesc')
-            )}
+            Your recommended maximum spending for this month based on your income, savings and goals.
           </p>
+
           <div className="metric-strip">
             <div>
               <strong>{financialHealthScore}/100</strong>
@@ -97,13 +117,35 @@ export default function DashboardPage() {
               <span>{t('dashboard.savingsRate')}</span>
             </div>
           </div>
-          <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <span style={{ display: 'block', fontSize: '0.85rem', opacity: 0.9 }}>Safe to Spend / Day</span>
-              <strong style={{ fontSize: '1.25rem' }}>{remainingBudget <= 0 ? '₹0.00/day' : `₹${safeToSpendPerDay.toFixed(2)}/day`}</strong>
+
+          <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.2)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <strong style={{ fontSize: '0.9rem', display: 'block' }}>Remaining This Month</strong>
+                <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
+                  Budget still available for the current month.
+                </span>
+              </div>
+              <strong style={{ fontSize: '1.25rem', color: '#4ade80', whiteSpace: 'nowrap', marginLeft: '12px' }}>
+                {remainingBudget !== null ? formatCurrency(remainingBudget) : 'Calculating...'}
+              </strong>
             </div>
-            <div>
-              <span style={{ fontSize: '0.85rem', opacity: 0.9 }}>Days Remaining This Month: {remainingDays}</span>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <strong style={{ fontSize: '0.9rem', display: 'block' }}>Daily Spending Guide</strong>
+                <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
+                  Based on your remaining budget and the days left this month.
+                </span>
+              </div>
+              <strong style={{ fontSize: '1.25rem', color: '#93c5fd', whiteSpace: 'nowrap', marginLeft: '12px' }}>
+                {dailySpendingGuide !== null ? `≈ ${formatCurrency(dailySpendingGuide)}/day` : 'Calculating...'}
+              </strong>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', opacity: 0.9 }}>
+              <span>Days Remaining</span>
+              <strong>{remainingDays} days</strong>
             </div>
           </div>
         </SurfaceCard>
@@ -265,8 +307,8 @@ export default function DashboardPage() {
             <Link className="button button--secondary button--block" to="/app/goals/new">
               {t('dashboard.addGoal')}
             </Link>
-            <Link className="button button--secondary button--block" to="/app/insights/weekly-report">
-              {t('dashboard.weeklyReport')}
+            <Link className="button button--secondary button--block" to="/app/ai/budget-recommendation">
+              {t('sidebar.ai_budget_recommendation')}
             </Link>
           </div>
         </SurfaceCard>

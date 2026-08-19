@@ -409,6 +409,18 @@ export function AppProvider({ children }) {
     return Math.max(totals.earningsTotal - totals.expensesTotal - recurringTotal - reservedGoalSavings, 0)
   }, [totals.earningsTotal, totals.expensesTotal, recurringTotal, reservedGoalSavings])
 
+  const monthlyBudgetLimit = useMemo(() => {
+    const recData = rBudgetRecommendation?.budget_recommendation
+    if (recData && recData.recommended_spending_limit !== undefined) {
+      const rawVal = Array.isArray(recData.recommended_spending_limit)
+        ? recData.recommended_spending_limit[0]
+        : recData.recommended_spending_limit
+      const num = Number(rawVal)
+      return isNaN(num) ? null : num
+    }
+    return null
+  }, [rBudgetRecommendation])
+
   const dashboardAnalytics = useMemo(() => {
     console.log("Transactions:", transactions);
     console.log("Goals:", goals);
@@ -984,6 +996,7 @@ export function AppProvider({ children }) {
         monthlyReport,
         weeklyTrend,
         safeToSpendToday,
+        monthlyBudgetLimit,
         financialHealthScore,
         financialHealthLabel,
         spendingAnalytics,

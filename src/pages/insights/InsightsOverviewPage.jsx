@@ -21,9 +21,9 @@ export default function InsightsOverviewPage() {
       <div className="stat-grid">
         <StatCard
           icon="spark"
-          label="Safe to spend"
+          label="Safe to Spend Now"
           value={formatCurrency(safeToSpendToday)}
-          description="Daily comfort zone after buffers."
+          description="Uncommitted liquid cash available after obligations."
           tone="neutral"
         />
         <StatCard

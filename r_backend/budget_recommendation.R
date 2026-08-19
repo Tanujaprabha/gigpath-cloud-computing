@@ -110,21 +110,43 @@ generate_personalized_budget <- function(payload) {
   total_goal_monthly_contrib <- sum(clean_goals$monthlyContribution, na.rm = TRUE)
   total_goal_remaining <- max(sum(clean_goals$targetAmount, na.rm = TRUE) - sum(clean_goals$alreadySaved, na.rm = TRUE), 0)
 
-  # Category Spend Breakdown
+  # Category Spend Breakdown with Normalization
+  normalize_category_key <- function(cat_name) {
+    if (is.null(cat_name) || is.na(cat_name) || cat_name == "") return("uncategorized")
+    c_str <- as.character(cat_name)
+    if (startsWith(c_str, "categories.")) {
+      c_str <- substring(c_str, 12)
+    }
+    c_clean <- tolower(trimws(c_str))
+    if (c_clean == "") return("uncategorized")
+    return(c_clean)
+  }
+
+  format_category_display <- function(key) {
+    if (key == "uncategorized") return("Uncategorized")
+    paste0(toupper(substr(key, 1, 1)), substr(key, 2, nchar(key)))
+  }
+
   cat_spending <- list()
   cat_counts <- list()
   if (nrow(expense_tx) > 0) {
-    cat_split <- split(expense_tx, expense_tx$category)
-    for (cname in names(cat_split)) {
-      sub_df <- cat_split[[cname]]
-      cat_spending[[cname]] <- sum(sub_df$amount, na.rm = TRUE)
-      cat_counts[[cname]] <- nrow(sub_df)
+    for (i in 1:nrow(expense_tx)) {
+      raw_cat <- expense_tx$category[i]
+      norm_key <- normalize_category_key(raw_cat)
+      amt <- if (!is.na(expense_tx$amount[i])) expense_tx$amount[i] else 0
+      
+      if (is.null(cat_spending[[norm_key]])) {
+        cat_spending[[norm_key]] <- amt
+        cat_counts[[norm_key]] <- 1
+      } else {
+        cat_spending[[norm_key]] <- cat_spending[[norm_key]] + amt
+        cat_counts[[norm_key]] <- cat_counts[[norm_key]] + 1
+      }
     }
   }
 
   # Define Essential Operating Categories (Fuel, Phone, Maintenance, Insurance, Taxes)
-  essential_keys <- c("fuel", "phone", "maintenance", "insurance", "taxes", "categories.fuel", 
-                      "categories.phone", "categories.maintenance", "categories.insurance")
+  essential_keys <- c("fuel", "phone", "maintenance", "insurance", "taxes")
 
   historical_essential_spend <- 0
   historical_discretionary_spend <- 0
@@ -176,41 +198,48 @@ generate_personalized_budget <- function(payload) {
   recommended_spending_limit <- round(recommended_essential + recommended_discretionary, 2)
 
   # ----------------------------------------------------------------------------
-  # REFINED CONTROLLED CATEGORY LIMIT RECOMMENDATION FORMULA
+  # REFINED CONSERVATIVE CATEGORY LIMIT RECOMMENDATION FORMULA
   # ----------------------------------------------------------------------------
   category_recommendations <- list()
   
   if (length(cat_spending) > 0) {
-    for (cname in names(cat_spending)) {
-      hist_amt <- cat_spending[[cname]]
-      obs_count <- cat_counts[[cname]]
+    for (norm_key in names(cat_spending)) {
+      hist_amt <- cat_spending[[norm_key]]
+      obs_count <- cat_counts[[norm_key]]
+      display_cat <- format_category_display(norm_key)
+      c_lower <- tolower(norm_key)
+
+      is_essential <- any(sapply(essential_keys, function(k) grepl(k, c_lower)))
 
       if (obs_count > 0 && hist_amt > 0) {
-        # Controlled Category Recommendation:
-        # Avoid artificial inflation: Cap expansion at max 10% over historical spend,
-        # bounded by available discretionary room share.
-        cat_share <- if (total_expenses > 0) hist_amt / total_expenses else 0
-        discretionary_topup <- min(recommended_discretionary * cat_share, hist_amt * 0.10)
-        
-        rec_limit <- round(hist_amt + discretionary_topup, 2)
-        diff <- round(rec_limit - hist_amt, 2)
+        if (is_essential) {
+          # Essential/Fixed categories: Keep at or near current spending (recommended_limit <= hist_amt)
+          rec_limit <- round(hist_amt, 2)
+          diff <- 0
+          reason_text <- sprintf("Keep %s spending near ₹%.2f based on your current spending pattern.", display_cat, rec_limit)
+        } else {
+          # Discretionary categories: Recommend conservative target control (recommended_limit < hist_amt)
+          rec_limit <- round(hist_amt * 0.90, 2)
+          diff <- round(rec_limit - hist_amt, 2)
+          reason_text <- sprintf("Try to keep %s spending near ₹%.2f to reduce discretionary spending.", display_cat, rec_limit)
+        }
 
         category_recommendations[[length(category_recommendations) + 1]] <- list(
-          category = cname,
+          category = display_cat,
           historical_spending = round(hist_amt, 2),
           recommended_limit = rec_limit,
           difference = diff,
           data_sufficiency = "sufficient",
-          reason = sprintf("Controlled recommendation based on historical spending (₹%.2f) and user cash margin.", hist_amt)
+          reason = reason_text
         )
       } else {
         category_recommendations[[length(category_recommendations) + 1]] <- list(
-          category = cname,
+          category = display_cat,
           historical_spending = 0,
           recommended_limit = 0,
           difference = 0,
           data_sufficiency = "insufficient_data",
-          reason = "Insufficient historical data for this category."
+          reason = sprintf("Insufficient historical data for %s.", display_cat)
         )
       }
     }
